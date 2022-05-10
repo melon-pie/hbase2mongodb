@@ -1,0 +1,13 @@
+
+target/classes/com/yuchen/ConnectHbase.class
+target/classes/com/yuchen/ConnectHDFS.class
+target/classes/com/yuchen/ConnectHive.class
+target/classes/com/yuchen/ConnectImpala.class
+target/classes/com/yuchen/ConnectPhoenix.class
+target/classes/com/yuchen/ReadFromFile.class
+target/classes/com/yuchen/UploadFileToHDFS.class
+target/classes/core-site.xml
+target/classes/hbase-site.xml
+target/classes/hdfs-site.xml
+/target/
+/src/main/resources/jar/
