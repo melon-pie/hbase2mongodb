@@ -1,7 +1,5 @@
 package com.yuchen.task;
 
-import com.alibaba.fastjson.JSON;
-import org.bson.Document;
 import com.mongodb.*;
 import com.yuchen.task.utils.MyDateUtils;
 import org.apache.avro.data.Json;
@@ -9,7 +7,6 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.*;
 import org.apache.hadoop.hbase.client.*;
-import org.apache.hadoop.hbase.filter.FilterList;
 import org.apache.hadoop.hbase.filter.PrefixFilter;
 import org.apache.hadoop.hbase.io.compress.Compression.Algorithm;
 import org.apache.hadoop.hbase.util.Bytes;
@@ -18,28 +15,40 @@ import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import  java.util.Calendar;
-import  java.util.Date;
-
 import java.io.IOException;
 import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 
-public class HbaseToMongdb {
+public class HbaseToMongdb_v1 {
     private static final String TABLE_NAME = "MY_TABLE_NAME_TOO";
     private static final String CF_DEFAULT = "DEFAULT_COLUMN_FAMILY";
 
     /** 声明一个 Connection类型的静态属性，用来缓存一个已经存在的连接对象 */
-    private static Connection hbaseConnection = null;
+    public static Connection hbaseConnection = null;
+    public static Admin admin = null;
 
-    private static final Logger logger = LoggerFactory.getLogger(HbaseToMongdb.class);
-    private static Admin admin = null;
+    private static final Logger logger = LoggerFactory.getLogger(HbaseToMongdb_v1.class);
 
     public static Configuration  config = null;
 
-    public static int  totalCount = 1;
-
+    public HbaseToMongdb_v1() throws IOException, URISyntaxException {
+        init();
+    }
+    void init() throws IOException, URISyntaxException {
+        config = HBaseConfiguration.create();
+        //Add any necessary configuration files (hbase-site.xml, core-site.xml)
+        // 系统环境变量读取配置文件
+//        config.addResource(new Path(System.getenv("HBASE_CONF_DIR"), "hbase-site.xml"));
+//        config.addResource(new Path(System.getenv("HADOOP_CONF_DIR"), "core-site.xml"));
+        // 加载本地配置文件
+        config.addResource(new Path(ClassLoader.getSystemResource("hbase-site.xml").toURI()));
+        config.addResource(new Path(ClassLoader.getSystemResource("core-site.xml").toURI()));
+        hbaseConnection = ConnectionFactory.createConnection(config);
+        admin = hbaseConnection.getAdmin();
+        System.setProperty("HADOOP_USER_NAME","hbase");
+        System.out.println("connect hbase");
+    }
     @Before
     public static void conn() throws IOException, InterruptedException, URISyntaxException {
         config = HBaseConfiguration.create();
@@ -76,7 +85,6 @@ public class HbaseToMongdb {
              Admin admin = connection.getAdmin()) {
             HTableDescriptor table = new HTableDescriptor(TableName.valueOf(TABLE_NAME));
             table.addFamily(new HColumnDescriptor(CF_DEFAULT).setCompressionType(Algorithm.NONE));
-
             System.out.println("Creating table.");
             createOrOverwrite(admin, table);
             System.out.println("Done.");
@@ -106,67 +114,17 @@ public class HbaseToMongdb {
         }
     }
 
-    /*
-     * get查询hbase表，
-     * note：put可以插入单条，也可以批量插入多条
-     * */
-    @Test
-    public void getQuery() throws IOException {
-        try (Connection connection = ConnectionFactory.createConnection(config);
-             Admin admin = connection.getAdmin()) {
-            TableName tableName = TableName.valueOf(TABLE_NAME);
-            Table table = connection.getTable(tableName);
-
-            byte[] rowkey = Bytes.toBytes("1111111111111");
-            System.out.println("getQuery");
-            Get get = new Get(rowkey);
-            // 在服务段做数据过滤，挑选出符合需求的列，不添加的话默认取出一整行数据，如果列很多的话，效率很低
-            get.addFamily(Bytes.toBytes(CF_DEFAULT));
-            get.addColumn(Bytes.toBytes(CF_DEFAULT), Bytes.toBytes("name"));
-            get.addColumn(Bytes.toBytes(CF_DEFAULT), Bytes.toBytes("age"));
-            get.addColumn(Bytes.toBytes(CF_DEFAULT), Bytes.toBytes("sex"));
-
-            Result result = table.get(get);
-            Cell cell01 = result.getColumnLatestCell(Bytes.toBytes(CF_DEFAULT), Bytes.toBytes("name"));
-            Cell cell02 = result.getColumnLatestCell(Bytes.toBytes(CF_DEFAULT), Bytes.toBytes("age"));
-            Cell cell03 = result.getColumnLatestCell(Bytes.toBytes(CF_DEFAULT), Bytes.toBytes("sex"));
-            System.out.println(Bytes.toString(CellUtil.cloneValue(cell01)));
-            System.out.println(Bytes.toString(CellUtil.cloneValue(cell02)));
-            System.out.println(Bytes.toString(CellUtil.cloneValue(cell03)));
-            table.close();
-        }
-    }
-
-    /*
-     * scan查询hbase表
-     * */
-
-    public static long getTwoHourBeforeTimestamp(){
-        Calendar calendar = Calendar.getInstance();
-        calendar.set(Calendar.SECOND, 0);
-        calendar.set(Calendar.MINUTE, 0);
-        calendar.set(Calendar.HOUR_OF_DAY, 0);
-        calendar.set(Calendar.MILLISECOND, 0);
-        return calendar.getTimeInMillis();
-    }
-
-
     /**筛选 url_hbase_v1符合条件的数据，获取其URL
      * 1.gkg，gal,ngr,index都存在date_part字段且index的date_part字段是七天内数据
      *
     * */
-    @Test
-    public static List<String> query5fc(String timeBefore) throws IOException {
-        Table table = null;
+    public List<String> query5fc(String timeBefore) throws IOException {
         List<String> rowkeylist = new ArrayList<>();
         List<String> datepartlist = new ArrayList<>();
         List<String> nonelist = new ArrayList<>();
-
-        try {
-            // 全部查询结束后再close
-            // 获得url_hbase_v1表
-            TableName tableName = TableName.valueOf("url_hbase_v1");
-            table = hbaseConnection.getTable(tableName);
+        // 获得url_hbase_v1表
+        TableName tableName = TableName.valueOf("url_hbase_v1");
+        try (Table table = hbaseConnection.getTable(tableName)){
             Scan scan = new Scan();
             // 取出前10000个版本
             // scan.readVersions(10000);
@@ -179,14 +137,14 @@ public class HbaseToMongdb {
             scan.addColumn(Bytes.toBytes("index"), Bytes.toBytes("date_part"));
 
             // 设置时间戳范围
-            if(timeBefore == "01:00"){ //一小时前至现在
-                scan.setTimeRange(MyDateUtils.subDateOneHour(), MyDateUtils.getCurrentTimestamp());
-            }else if(timeBefore == "02:00"){ //两小时前至现在
-                scan.setTimeRange(MyDateUtils.subDateTwoHour(), MyDateUtils.getCurrentTimestamp());
-            }else if(timeBefore == "00:00"){ //0点至现在的时间戳
-                scan.setTimeRange(MyDateUtils.getZeroTimestamp(), MyDateUtils.getCurrentTimestamp());
+            if(timeBefore == "1"){ //至十五分钟前的一小时数据
+                scan.setTimeRange(MyDateUtils.subDateOneHour(), MyDateUtils.sub15Minute());
+            }else if(timeBefore == "2"){ //至十五分钟前的两小时数据
+                scan.setTimeRange(MyDateUtils.subDateTwoHour(), MyDateUtils.sub15Minute());
+            }else if(timeBefore == "0"){ //0点至至十五分钟前
+                scan.setTimeRange(MyDateUtils.getZeroTimestamp(), MyDateUtils.sub15Minute());
             }else { // 默认取before天前至现在的时间戳
-                scan.setTimeRange(MyDateUtils.getBeforTimestamp(-1), MyDateUtils.getCurrentTimestamp());
+                scan.setTimeRange(MyDateUtils.getBeforTimestamp(-1), MyDateUtils.sub15Minute());
             }
 
             // scan.setTimeRange(MyDateUtils.getZeroTimestamp(), MyDateUtils.getCurrentTimestamp());
@@ -199,7 +157,6 @@ public class HbaseToMongdb {
                 String rowkey = Bytes.toString(result.getRow());
                 // 5个库信息都有
                 if(result.rawCells().length == columnNum){
-
                     // index的date_part是七天内
                     Cell cell = result.getColumnLatestCell(Bytes.toBytes("index"), Bytes.toBytes("date_part"));
                     String index_date_part = new String(CellUtil.cloneValue (cell), StandardCharsets.UTF_8);
@@ -237,10 +194,6 @@ public class HbaseToMongdb {
         }
         catch (Exception e) {
             e.printStackTrace();
-        }finally {
-            if(table != null){
-                table.close();
-            }
         }
         return  rowkeylist;
     }
@@ -252,28 +205,26 @@ public class HbaseToMongdb {
      *  02:00表示2小时前
      *  -1表示一天前
      * */
-    public static List<DBObject> scanEnvenForLatest(String timeBefore) throws IOException {
-        Table table = null;
+    public HashMap<String, DBObject> scanEnvenForLatest(String timeBefore) throws IOException {
+        TableName tableName = TableName.valueOf("event_hbase_v1");
         List<String> rowkeylist = new ArrayList<>();
         List<String> datepartlist = new ArrayList<>();
         List<String> nonelist = new ArrayList<>();
+        // 生成map形式，key用于消息推送，value用于插入mango
+        HashMap<String, DBObject> resultMap = new HashMap<>();
+        // 直接生成插入mangdb的对象
         List<DBObject> resultList = new ArrayList<DBObject>();
-        try {
-            // 全部查询结束后再close
-            // 获得url_hbase_v1表
-            TableName tableName = TableName.valueOf("event_hbase_v1");
-            table = hbaseConnection.getTable(tableName);
+        try (Table table = hbaseConnection.getTable(tableName);){
             Scan scan = new Scan();
-
             // 设置时间戳范围
-            if(timeBefore == "01:00"){ //一小时前至现在
-                scan.setTimeRange(MyDateUtils.subDateOneHour(), MyDateUtils.getCurrentTimestamp());
-            }else if(timeBefore == "02:00"){ //两小时前至现在
-                scan.setTimeRange(MyDateUtils.subDateTwoHour(), MyDateUtils.getCurrentTimestamp());
-            }else if(timeBefore == "00:00"){ //0点至现在的时间戳
-                scan.setTimeRange(MyDateUtils.getZeroTimestamp(), MyDateUtils.getCurrentTimestamp());
-            }else { // 默认before天前至现在的时间戳
-                scan.setTimeRange(MyDateUtils.getBeforTimestamp(-1), MyDateUtils.getCurrentTimestamp());
+            if(timeBefore == "1"){ //至十五分钟前的一小时数据
+                scan.setTimeRange(MyDateUtils.subDateOneHour(), MyDateUtils.sub15Minute());
+            }else if(timeBefore == "2"){ //至十五分钟前的两小时数据
+                scan.setTimeRange(MyDateUtils.subDateTwoHour(), MyDateUtils.sub15Minute());
+            }else if(timeBefore == "0"){ //0点至至十五分钟前
+                scan.setTimeRange(MyDateUtils.getZeroTimestamp(), MyDateUtils.sub15Minute());
+            }else { // 默认取before天前至现在的时间戳
+                scan.setTimeRange(MyDateUtils.getBeforTimestamp(-1), MyDateUtils.sub15Minute());
             }
 
             ResultScanner scanner = table.getScanner(scan);
@@ -306,12 +257,8 @@ public class HbaseToMongdb {
                             // 添加到文档对象
                             resultDBObject.put(key, value);
                         }
-                        resultList.add(resultDBObject);
-                        // 增加到resultsMap
-                        //测试，有数据则跳出，需要注释
-//                        if(!resultsMap.isEmpty()){
-//                            break;
-//                        }
+                        resultMap.put(rowkey, resultDBObject);
+                        // resultList.add(resultDBObject);
                         System.out.println(index_date_part);
                     }else { //七天外丢弃
                         nonelist.add(Bytes.toString(result.getRow()));
@@ -334,30 +281,24 @@ public class HbaseToMongdb {
         }
         catch (Exception e) {
             e.printStackTrace();
-        }finally {
-            if(table != null){
-                table.close();
-            }
         }
-        return  resultList;
+        return  resultMap;
     }
 
-    /**mention表中get查询一批URL
+    /**mention表或者url中get查询一批URL
      *1.URL对应mention列表
      *2.mention对应属性列表
      * {URL: { mentionID : {mention_qualifier, value}, mentionID : { mention_qualifier, value},...} }
      * */
-    private static List<DBObject> urlGetBatch(List<String> rowkeyList) throws IOException {
+    private HashMap<String, DBObject> urlGetBatch(List<String> rowkeyList) throws IOException {
         String tableName = "url_hbase_v1";
         Table table = hbaseConnection.getTable( TableName.valueOf(tableName));// 获取表
 
         // 批量查询对应的mentions
         ArrayList getList = new ArrayList();
         // {URL: { mentionID : {mention_qualifier, value}, mentionID : { mention_qualifier, value}...
-
         // 返回结果
-        List<DBObject> resultList = new ArrayList<DBObject>();
-        // Map<String,  Map<String, ArrayList<String>>> resultsMap = new HashMap<>();
+        HashMap<String, DBObject> resultMap = new HashMap<>();
 
 
         for (String rowkey : rowkeyList){//把rowkey加到get里，再把get装到list中
@@ -369,14 +310,15 @@ public class HbaseToMongdb {
         Result[] results = table.get(getList);//重点在这，直接查getList<Get>
         // 结束时间
         long endTimestamp_get = MyDateUtils.getCurrentTimestamp();
-
+        System.out.println("Timestamp_get:" + (endTimestamp_get - startTimestamp_get));
         //对返回的结果集进行操作
         for (Result result : results){
             // 获取主键以及对应的map
             String rowkey = Bytes.toString(result.getRow());
+            // mangodb存储对象
             DBObject resultDBObject = new BasicDBObject();
+            // 如果是url_hbase_v1则存主键，否则不存主键
             resultDBObject.put("_id", rowkey);
-            
             for (Cell cell : result.rawCells()) {
                 String family = new String(CellUtil.cloneFamily(cell));
                 String qualifier = new String(CellUtil.cloneQualifier(cell));
@@ -384,96 +326,141 @@ public class HbaseToMongdb {
                 String value = Bytes.toString(CellUtil.cloneValue(cell));
                 resultDBObject.put(key, value);
             }
-            resultList.add(resultDBObject);
+            resultMap.put(rowkey, resultDBObject);
+
             //测试，有数据则跳出，需要注释
 //            if(!resultList.isEmpty()){
 //                break;
 //            }
         }
-        return resultList;
+        long endTimestamp = MyDateUtils.getCurrentTimestamp();
+        System.out.println("批量get耗时:" + (endTimestamp - startTimestamp_get));
+        return resultMap;
+    }
+    private HashMap<String, List<DBObject>> mentionGetBatch(List<String> rowkeyList) throws IOException {
+        String tableName = "urlmention_hbase_v1";
+        Table table = hbaseConnection.getTable( TableName.valueOf(tableName));// 获取表
+
+        // 批量查询对应的mentions
+        ArrayList getList = new ArrayList();
+        // {URL: { mentionID : {mention_qualifier, value}, mentionID : { mention_qualifier, value}...
+        // 返回结果
+        HashMap<String, List<DBObject>> resultMap = new HashMap<>();
+
+        for (String rowkey : rowkeyList){//把rowkey加到get里，再把get装到list中
+            Get get = new Get(Bytes.toBytes(rowkey));
+            getList.add(get);
+        }
+        // 开始时间
+        long startTimestamp_get = MyDateUtils.getCurrentTimestamp();
+        Result[] results = table.get(getList);//重点在这，直接查getList<Get>
+        // 结束时间
+        long endTimestamp_get = MyDateUtils.getCurrentTimestamp();
+        System.out.println("startTimestamp02:" + (endTimestamp_get - startTimestamp_get));
+        //对返回的结果集进行操作
+        for (Result result : results){
+            // rowkey的第一部分为url，是map的键，rowkey的第二部分用于判断放入同一列表
+            String url = Bytes.toString(result.getRow()).split("_")[0];
+            String mentionId = Bytes.toString(result.getRow()).split("_")[1];
+            // 取出对应list，新添加一个mention
+            List<DBObject> mentionList = resultMap.getOrDefault(url, new ArrayList<>());
+            DBObject resultDBObject = new BasicDBObject();
+            for (Cell cell : result.rawCells()) {
+                String family = new String(CellUtil.cloneFamily(cell));
+                String qualifier = new String(CellUtil.cloneQualifier(cell));
+                String key = family + '_' + qualifier.replace("\n","");
+                String value = Bytes.toString(CellUtil.cloneValue(cell));
+                resultDBObject.put(key, value);
+            }
+            mentionList.add(resultDBObject);
+            resultMap.put(url, mentionList);
+
+            //测试，有数据则跳出，需要注释
+//            if(!resultList.isEmpty()){
+//                break;
+//            }
+        }
+        long endTimestamp = MyDateUtils.getCurrentTimestamp();
+        System.out.println("批量get耗时:" + (endTimestamp - startTimestamp_get));
+        return resultMap;
     }
     /**mention表中get查询一批URL
      *1.URL对应mention列表
      *2.mention对应属性列表
      * {URL: { mentionID : {mention_qualifier, value}, mentionID : { mention_qualifier, value},...} }
      * */
-    public static List<DBObject> mentionGetBatch(List<String> rowkeyList) throws IOException {
+    public List<String> queryMention(List<String> rowkeyList) throws IOException {
         String tableName = "urlmention_hbase_v1";
-        Table table = hbaseConnection.getTable(TableName.valueOf(tableName));// 获取表
+        // 结果存入newRowkeylist
+        List<String> newRowkeylist = new ArrayList<>();
 
-        // 批量查询对应的mentions
-        ArrayList getList = new ArrayList();
-        // String url = "00000024c0c9f3f1150ee303ffce51bf";
-        List<String> rowkeyList1 = new ArrayList();
-        // rowkeyList.add("00000024c0c9f3f1150ee303ffce51bf");
-
-        // 返回结果
-        List<DBObject> resultList = new ArrayList<DBObject>();
-
-        int testCount = 0;
-        int count_sucess = 0;
-        int count_failed = 0;
-        // 开始时间
-        long startTimestamp = MyDateUtils.getCurrentTimestamp();
-        for (String url : rowkeyList) {
-            testCount++;
-            Scan scan = new Scan();
-            // and操作
-            FilterList filterList = new FilterList(FilterList.Operator.MUST_PASS_ALL);
-            // 前缀过滤器, rowkey作为前缀
-            PrefixFilter filter = new PrefixFilter(Bytes.toBytes(url));
-            filterList.addFilter(filter);
-            scan.setFilter(filterList);
-            long startTimestamp_scan = MyDateUtils.getCurrentTimestamp();
-            ResultScanner results = table.getScanner(scan);
-            long endTimestamp_scan = MyDateUtils.getCurrentTimestamp();
-            System.out.println("scan用时:" + (startTimestamp_scan - endTimestamp_scan) + "mm");
-            //对返回的结果集进行操作
-            Result result = results.next();
-            if(result == null){
-                count_failed++;
-                System.out.println("mention未查询到,失败数：" + count_failed);
-                continue;
-            }
-            count_sucess++;
-            System.out.println("mention查询到,成功数：" + count_sucess);
-            String rowkey = Bytes.toString(result.getRow()).split("_")[0];
-            String mentionId = Bytes.toString(result.getRow()).split("_")[1];
-            DBObject resultDBObject = new BasicDBObject();
-            List<DBObject> mentionList = new ArrayList<DBObject>();
-
-            // 多个mention循环
-            while (result != null){
-                DBObject mentionItem = new BasicDBObject();
-                // 一个mention的字段循环
-                for (Cell cell : result.rawCells()) {
-                    String qualifier = new String(CellUtil.cloneQualifier(cell));
-                    String key = "mention_" + qualifier.replace("\n","");
-                    String value = Bytes.toString(CellUtil.cloneValue(cell));
-                    mentionItem.put(key, value);
+        try (Table table = hbaseConnection.getTable(TableName.valueOf(tableName))) {
+            // 日志变量
+            int testsize = rowkeyList.size();
+            int testCount = 0;
+            // 晒出10个mention就返回插入mangdb
+            int count_sucess = 0;
+            int count_failed = 0;
+            // 开始时间
+            long startTimestamp = MyDateUtils.getCurrentTimestamp();
+            for (String url : rowkeyList) {
+                long startTimestamp01 = MyDateUtils.getCurrentTimestamp();
+                //总查询次数
+                testCount++;
+                // 前缀过滤器, rowkey作为前缀
+                Scan scan = new Scan();
+                PrefixFilter filter = new PrefixFilter(Bytes.toBytes(url));
+                scan.setFilter(filter);
+                long startTimestamp02 = MyDateUtils.getCurrentTimestamp();
+                System.out.println("startTimestamp02:" + (startTimestamp02 - startTimestamp01));
+                long startTimestamp_scan = MyDateUtils.getCurrentTimestamp();
+                ResultScanner results = table.getScanner(scan);
+                long endTimestamp_scan = MyDateUtils.getCurrentTimestamp();
+                System.out.println("scan用时:" + (endTimestamp_scan - startTimestamp_scan) + "mm");
+                long startTimestamp03 = MyDateUtils.getCurrentTimestamp();
+                System.out.println("startTimestamp03:" + (startTimestamp03 - startTimestamp02));
+                // 辅助变量c==0则表示没有对应mention
+                int c = 0;//辅助变量
+                for (Result result : results){
+                    // 辅助变量
+                    c++;
+                    // 存主键
+                    String rowkey = Bytes.toString(result.getRow());
+                    newRowkeylist.add(rowkey);
+                    // 测试
                 }
-                mentionList.add(mentionItem);
-                result = results.next();
+                long startTimestamp04 = MyDateUtils.getCurrentTimestamp();
+                System.out.println("startTimestamp04:" + (startTimestamp04 - startTimestamp03));
+
+                if(c==0){
+                    // 打印日志
+                    count_failed++;
+                    System.out.println("mention未查询到,失败数：" + count_failed);
+                    System.out.println("已查询数：" + testCount);
+                    System.out.println("总需要查询数：" + testsize);
+                }else{
+                    count_sucess++;
+
+
+                    // 打印日志
+                    System.out.println("mention查询到,成功数：" + count_sucess);
+                    System.out.println("总查询数：" + testCount);
+                    System.out.println("总需要查询数：" + testsize);
+                    // 测试代码, 只返回2条, 需要注释
+                    if(count_sucess == 10){
+                        return newRowkeylist;
+                    }
+                }
+                System.out.println("--------------------------------------");
             }
-
-            // 加入resultList
-            resultDBObject.put("_id", rowkey);
-            resultDBObject.put("mentionList", mentionList);
-            resultList.add(resultDBObject);
-
-            //测试，有数据则跳出，需要注释
-//            if (!resultList.isEmpty()) {
-//                System.out.println("查询到一条,已查询数：" + testCount);
-//                break;
-//            }
+            long endTimestamp = MyDateUtils.getCurrentTimestamp();
+            System.out.println("mention查询完毕, 用时" + (endTimestamp - startTimestamp) + "mm");
+            System.out.println("总查询条数：" + testCount);
+            System.out.println("成功条数：" + count_sucess);
+            System.out.println("失败条数：" + count_failed);
+        } catch (Exception ignored) {
         }
-        // 结束时间
-        table.close();
-        long endTimestamp = MyDateUtils.getCurrentTimestamp();
-        System.out.println("mention查询完毕, 用时" + (endTimestamp - startTimestamp) + "mm");
-        System.out.println("成功条数：" + count_sucess);
-        System.out.println("失败条数：" + count_failed);
-        return resultList;
+        return newRowkeylist;
     }
 
     public DBCollection getMongdbCollection(String host, int port, String dbname, String collname) throws IOException {
@@ -482,8 +469,73 @@ public class HbaseToMongdb {
         return db.getCollection(collname);
     }
 
+    /** 定期将hbase数据更新到mongodb
+     * TODO：eventMessageList推送功能
+     * */
+    public void hbase2mangoEventTable(DBCollection eventCollection) throws IOException, URISyntaxException, InterruptedException {
+        // hbase
+        // eventMap
+        HashMap<String, DBObject> eventMap = this.scanEnvenForLatest("-2");
 
-    public static void close() throws IOException {
+        // mangodb
+        // 操作mongo
+        // 遍历集合取eventMessageList用于推送, eventList用于存入mangodb
+        List<String> eventMessageList = new ArrayList<>();
+        List<DBObject> eventList = new ArrayList<DBObject>();
+        eventMap.forEach((key,value)->{
+            eventMessageList.add(key);
+            eventList.add(value);
+        });
+        // 批量写入
+        // eventCollection.insert(eventList);
+        // 无法批量覆写，只能是遍历save覆写单条,存入mango
+        System.out.println("正在存入mango");
+        eventList.forEach(eventCollection::save);
+        System.out.println("mango存入完毕");
+        // 打印最终的推送列表
+        System.out.println(eventMessageList);
+    }
+
+    /** 筛选拼接hbase表，存入mangodb
+     * TODO：urlMessageList推送功能
+     * */
+    public void hbase2mangoUrlTable(DBCollection urlCollection) throws IOException, URISyntaxException, InterruptedException {
+        // hbase
+        // 操作hbase
+        // 筛选出geg,gkg,gal,ngr,index都有的rowkey
+        List<String> query5fcResults = this.query5fc("2");
+        // 拿到对应rowkey的所有url_hbase_v1数据, 主键为URL
+        HashMap<String, DBObject> urlMap = this.urlGetBatch(query5fcResults); // DBObject包含主键 _id
+        // 拿到url对应的所有mention list, 返回所有符合条件的主键组成的list，这里测试限制为10条
+        List<String>  queryMentionResults = this.queryMention(query5fcResults);
+        // 根据mention list主键列表批量查询
+        HashMap<String, List<DBObject>> url2mentionMap = this.mentionGetBatch(queryMentionResults);// DBObject中不包含主键 _id
+
+        // 空间换时间：map的O(1)操作合并相同主键的信息，将url_mention中的list合并到url表中，一次性存入mongdb
+        // urlMessageList为推送列表，urlList为mongo存储列表
+        List<String> urlMessageList = new ArrayList<>();
+        List<DBObject> urlList = new ArrayList<>();
+        url2mentionMap.forEach((key,value)->{
+            System.out.println("key = " + key);
+            System.out.println("value = " + value);
+            DBObject resultDBObject = urlMap.getOrDefault(key, new BasicDBObject());
+            resultDBObject.put("mentionList", value);
+            urlMessageList.add(key);
+            urlList.add(resultDBObject);
+        });
+        System.out.println("**********************************************");
+
+        // 批量写入
+        // urlCollection.insert(urlList);
+        // 无法批量覆写，只能是遍历save覆写单条,存入mango
+        System.out.println("正在存入mango");
+        urlList.forEach(urlCollection::save);
+        System.out.println("mango存入完毕");
+        // 打印最终的推送列表
+        System.out.println(urlMessageList);
+    }
+
+    public void close() throws IOException {
         try{
             if(hbaseConnection != null){
                 hbaseConnection.close();
@@ -495,59 +547,25 @@ public class HbaseToMongdb {
             e.printStackTrace();
         }
     }
-
-    public static void add(String name, int age, String sex) {
-        DBObject userInfo = new BasicDBObject();
-        userInfo.put("name", name);
-        userInfo.put("age", age);
-        userInfo.put("sex", sex);
-
-
-    }
     public static void main(String[] args) throws IOException, URISyntaxException, InterruptedException {
-        HbaseToMongdb hbaseToMongdb = new HbaseToMongdb();
-        DBCollection collection = null;
 
-        // 连接
-        conn();
-        // 操作hbase
-        // 筛选出geg,gkg,gal,ngr,index都有的rowkey
-        List<String> query5fc_results = query5fc("02:00");
-        // 拿到对应rowkey的所有url_hbase_v1数据, 主键为URL
-         List<DBObject> urllist = urlGetBatch(query5fc_results);
-        // 根据rowkey拿到url对应的所有mention list, 主键为URL
-        List<DBObject>  mention_results = mentionGetBatch(query5fc_results);
-        close();
-
-
-        // 操作mongo
-        DBCollection urlCollection;
+        HbaseToMongdb_v1 hbaseToMongdb = new HbaseToMongdb_v1();
+        // mongodb连接
         DBCollection eventCollection;
-        DBCollection urlMentionCollection;
+        DBCollection urlCollection;
         try {
-            urlCollection = hbaseToMongdb.getMongdbCollection("192.168.12.180", 28100, "gdelt", "url01");
-            urlMentionCollection = hbaseToMongdb.getMongdbCollection("192.168.12.180", 28100, "gdelt", "url_mention");
             eventCollection = hbaseToMongdb.getMongdbCollection("192.168.12.180", 28100, "gdelt", "event");
+            urlCollection = hbaseToMongdb.getMongdbCollection("192.168.12.180", 28100, "gdelt", "url");
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
-        //urlCollection.insert(urllist);
-        urlMentionCollection.insert(mention_results);
-        //eventCollection.insert(all_event_results);
 
+        // 事件表
+        // hbaseToMongdb.hbase2mangoEventTable(eventCollection);
 
-        if (urlCollection != null){
-            DBCursor cursor = urlCollection.find();
-            try {
-                while(cursor.hasNext()) {
-                    System.out.println(cursor.next());
-                }
-            } finally {
-                cursor.close();
-            }
-        }else {
-            System.out.println("连接失败");
-        }
+        // url表
+        hbaseToMongdb.hbase2mangoUrlTable(urlCollection);
+        // 释放资源
+        hbaseToMongdb.close();
     }
-
 }

@@ -26,6 +26,8 @@ import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 
+/** 未使用，仅供参考
+ * */
 public class HbaseToMongdb {
     private static final String TABLE_NAME = "MY_TABLE_NAME_TOO";
     private static final String CF_DEFAULT = "DEFAULT_COLUMN_FAMILY";
@@ -439,8 +441,9 @@ public class HbaseToMongdb {
             System.out.println("mention查询到,成功数：" + count_sucess);
             String rowkey = Bytes.toString(result.getRow()).split("_")[0];
             String mentionId = Bytes.toString(result.getRow()).split("_")[1];
-            DBObject resultDBObject = new BasicDBObject();
             List<DBObject> mentionList = new ArrayList<DBObject>();
+            DBObject resultDBObject = new BasicDBObject();
+
 
             // 多个mention循环
             while (result != null){
